@@ -1,4 +1,4 @@
-###Install Linux
+#### Install Linux
 1. change to kernel source directory
    cd linux-3.2.30
 2. generate .config file
@@ -8,7 +8,7 @@
    make -j16 bzImage && make -j16 modules
 4. install the kernel and modules
    make modules_install && make install
-###Install Xen
+#### Install Xen
 1. change to Xen source directory
    cd xen-4.2.1
 2. check all the dependencies

@@ -109,7 +109,6 @@
 
 #endif /* CSCHED_STATS */
 
-#define HISTO_BUCKETS				30	// For spinlock accounting
 #define SWITCH_BOUNDARY				900
 #define SLICE_UPDATE_WINDOW			3
 #define EVENT_TRACKING_WINDOW		5
@@ -156,14 +155,6 @@ struct csched_vcpu {
     uint16_t flags;
     int16_t pri;
 	unsigned long long prev_pmc[4];
-	/*
-    unsigned long long vcpu_histo_wait_count[HISTO_BUCKETS+1];
-    unsigned long long vcpu_histo_wait_time[HISTO_BUCKETS+1];
-	unsigned long long vcpu_histo_hold_count[HISTO_BUCKETS+1];
-	unsigned long long vcpu_histo_hold_time[HISTO_BUCKETS+1];
-    unsigned long long vcpu_wait_time_sum;
-    unsigned long long vcpu_hold_time_sum;
-	*/
 #ifdef CSCHED_STATS
     struct {
         int credit_last;
@@ -226,14 +217,6 @@ struct csched_dom {
 	unsigned long pending_requests;
 	struct event_sample filter[EVENT_TRACKING_WINDOW];
 	struct subms_data submilli[10];
-	/*
-	unsigned long long dom_histo_wait_count[HISTO_BUCKETS+1];
-	unsigned long long dom_histo_wait_time[HISTO_BUCKETS+1];
-	unsigned long long dom_histo_hold_count[HISTO_BUCKETS+1];
-	unsigned long long dom_histo_hold_time[HISTO_BUCKETS+1];
-	unsigned long long dom_wait_time_sum;
-	unsigned long long dom_hold_time_sum;
-	*/
 };
 
 /*
@@ -265,8 +248,6 @@ struct csched_private {
 
 extern int do_vcrd_op(unsigned long long time, int lock)
 {
-    //static unsigned long long total_time = 0;
-    //static unsigned long long count = 0;
 	struct domain *dom = current->domain;
 	struct csched_dom *sdom = CSCHED_DOM(dom);
 	
@@ -274,83 +255,8 @@ extern int do_vcrd_op(unsigned long long time, int lock)
 	sdom->spinlock_metric_update += time;
 	sdom->spinlock_count++;
 	
-	/*
-    if(dom->domain_id == 1)
-    {
-        total_time += time;
-        count++;
-        printk(XENLOG_WARNING "total_time:%lld, total_count:%lld\n", total_time, count);
-    }
-	*/
-	
     return 1;
 }
-
-
-/*added*/
-/*
-extern int do_spinstat_op(unsigned long long time, int type)
-{
-	struct vcpu *vc = current;
-	struct csched_vcpu * const svc = CSCHED_VCPU(vc);
-	struct domain *dom = current->domain;
-	struct csched_dom *sdom = CSCHED_DOM(dom);
-	unsigned index = fls(time); 
-	
-	//static unsigned long long total_time = 0;
-
-	if(dom->domain_id == 1 && type == 2)
-	{
-		total_time += time;
-		printk(XENLOG_WARNING "lock holding total time: %llums time: %llums\n", total_time/1000, time/1000);
-	}
-	
-	switch(type)
-	{
-		case 1:
-			if(likely(index < HISTO_BUCKETS))
-			{
-				++svc->vcpu_histo_wait_count[index];
-				svc->vcpu_histo_wait_time[index] += time;
-				++sdom->dom_histo_wait_count[index];
-				sdom->dom_histo_wait_time[index] += time;
-			}
-			else
-			{
-				++svc->vcpu_histo_wait_count[HISTO_BUCKETS];
-				svc->vcpu_histo_wait_time[HISTO_BUCKETS] += time;
-				++sdom->dom_histo_wait_count[HISTO_BUCKETS];
-				sdom->dom_histo_wait_time[HISTO_BUCKETS] += time;
-			}
-			svc->vcpu_wait_time_sum += time;
-			sdom->dom_wait_time_sum += time;
-			break;
-		case 2:
-			if(likely(index < HISTO_BUCKETS))
-			{
-				++svc->vcpu_histo_hold_count[index];
-				svc->vcpu_histo_hold_time[index] += time;
-				++sdom->dom_histo_hold_count[index];
-				sdom->dom_histo_hold_time[index] += time;
-			}
-			else
-			{
-				++svc->vcpu_histo_hold_count[HISTO_BUCKETS];
-				svc->vcpu_histo_hold_time[HISTO_BUCKETS] += time;
-				++sdom->dom_histo_hold_count[HISTO_BUCKETS];
-				sdom->dom_histo_hold_time[HISTO_BUCKETS] += time;
-			}
-			svc->vcpu_hold_time_sum += time;
-			sdom->dom_hold_time_sum += time;
-			break;
-	}
-	if(dom->domain_id == 1)
-	{
-		printk(XENLOG_WARNING "wait_time:%llu    loop_count:%llu    histo_index:%d\n", wait_time, loop_count, index);
-	}
-	return 0;
-}
-*/
 
 static void csched_event_window_shift(struct csched_dom *sdom,
 								  unsigned long long spinlock,
@@ -455,13 +361,11 @@ static void csched_submilli_metric_update(struct csched_dom *sdom,
 			if(miss_rate_window >= 100)
 			{
 				sdom->phase = SPIN_LOW_PHASE;
-				//sdom->submilli[idx].cache_miss_accum = sdom->submilli[idx].cache_miss_accum / ALPHA + miss_rate_window * (ALPHA - 1) / ALPHA ;
 				csched_increase_time_slice(sdom);
 			}
 			else
 			{
 				sdom->phase = SPIN_HIGH_PHASE;
-				//sdom->submilli[idx].spinlock_accum = sdom->submilli[idx].spinlock_accum / ALPHA + spinlock_mean * (ALPHA - 1 ) / ALPHA;
 				csched_decrease_time_slice(sdom);
 			}
 			/*else
@@ -481,11 +385,6 @@ static void csched_submilli_metric_update(struct csched_dom *sdom,
 		}
 	}
 
-	/*if(avg_spinlock > 1024)
-		sdom->submilli[idx].spinlock_accum = sdom->submilli[idx].spinlock_accum / ALPHA + avg_spinlock * (ALPHA - 1) / ALPHA;*/
-	
-	/*if(sdom->dom->domain_id == 4 && sdom->tslice_us == 1111)
-		printk(XENLOG_WARNING "inst:%8lld   cache miss:%8lld   miss window:%5d   miss curr:%5d   window:%3d   spinlock accum:%5lld   cache miss accum:%5lld   time slice:%5d\n", inst_retired, cache_misses, miss_rate_window, miss_rate_curr, sdom->event_tracking_window, sdom->submilli[idx].spinlock_accum, sdom->submilli[idx].cache_miss_accum, sdom->tslice_us);*/
 /*	if(sdom->dom->domain_id == 4)
 		printk(XENLOG_WARNING "inst:%10lld   cache miss:%8lld   miss window:%5d   miss curr:%5d   window:%3d   spinlock latency:%8lld   time slice:%5d\n", inst_retired, cache_misses, miss_rate_window, miss_rate_curr, sdom->event_tracking_window, sdom->spinlock_metric_update, sdom->tslice_us);*/
 }
@@ -566,189 +465,12 @@ static void csched_metric_tick(void *_cpu)
     set_timer(&spc->metric_ticker, NOW() + MICROSECS(CSCHED_METRIC_TICK_PERIOD) );
 }
 
-/*added*/
-/*static void update_time_slice(struct csched_dom *sdom)
-{
-	int spin_high_count = 0;
-	int spin_low_count = 0;
-	list_for_each_safe()
-}*/
-
-/*
-static void csched_update_acct(void)
-{
-	struct list_head *iter_sdom, *next_sdom;
-	struct csched_dom *sdom;
-	struct csched_private *prv = global_prv;
-	unsigned int tslice = 30000;
-	unsigned int spin_low_count = 0, spin_high_count = 0;
-	unsigned int spin_low_max = 100, spin_high_min = tslice;
-	
-	list_for_each_safe(iter_sdom, next_sdom, &prv->active_sdom)
-	{
-		sdom = list_entry(iter_sdom, struct csched_dom, active_sdom_elem);
-
-		if(sdom->dom->domain_id == 0)	continue;
-		if(sdom->phase == SPIN_LOW_PHASE)
-		{
-			spin_low_count++;
-			if(sdom->tslice_us > spin_low_max)
-				spin_low_max = sdom->tslice_us;
-		}
-		else
-		{
-			spin_high_count++;
-			if(sdom->tslice_us < spin_high_min)
-				spin_high_min = sdom->tslice_us;
-		}
-	}
-
-	if(spin_low_count <= spin_high_count)
-		tslice = spin_high_min;
-	else
-		tslice = spin_low_max;
-
-	list_for_each_safe(iter_sdom, next_sdom, &prv->active_sdom)
-	{
-		sdom = list_entry(iter_sdom, struct csched_dom, active_sdom_elem);
-		sdom->tslice_us = tslice;
-	}
-
-	prv->tslice_us = tslice;
-	prv->ticks_per_tslice = CSCHED_TICKS_PER_TSLICE;
-	if(prv->tslice_us < prv->ticks_per_tslice)
-		prv->ticks_per_tslice = 1;
-	prv->tick_period_us = prv->tslice_us / prv->ticks_per_tslice;
-	prv->credits_per_tslice = CSCHED_CREDIT_PER_US * prv->tslice_us;
-	prv->credit = prv->ncpus * prv->credits_per_tslice;
-	printk(XENLOG_WARNING "Global Time Slice: %d\n", prv->tslice_us);
-	printk("high count:%d    low count:%d    high min ts:%6d    low max ts:%6d    global ts:%6d\n",
-			spin_high_count, spin_low_count, spin_high_min, spin_low_max, prv->tslice_us);
-}*/
-
 static void csched_dynamic_time_slice(void *dummy)
 {
 	struct csched_private *prv = dummy;
 
-/*	unsigned long flags;
-
-	spin_lock_irqsave(&prv->lock, flags);
-	csched_update_acct();
-	spin_unlock_irqrestore(&prv->lock, flags);
-*/	
-/*	
-	if(prv->tslice_us > 1111)
-		set_timer(&prv->slice_ticker, NOW() + MICROSECS(CSCHED_TIME_APPLY / 3));
-	else
-		set_timer(&prv->slice_ticker, NOW() + MICROSECS(CSCHED_TIME_APPLY));
-
-	prv->metric_update++;
-*/
-/*
-	for_each_domain(dom)
-	{
-		struct csched_dom *sdom = CSCHED_DOM(dom);
-		unsigned long long latency, count, avg_latency;
-
-		if(is_idle_domain(dom)) continue;
-		latency = sdom->spinlock_latency;
-		count = sdom->spinlock_count;
-		avg_latency = count > 0 ? latency / count : 0;
-		if(dom->domain_id == 4 && avg_latency > 0)
-			printk(XENLOG_WARNING "spinlock latency: %10lld    count: %8lld    avg spinlock: %10lld    spinlock log: %8d\n",
-				latency, count, avg_latency, fls(avg_latency));
-		sdom->spinlock_latency = 0;
-		sdom->spinlock_count = 0;
-	}
-*/	
 	set_timer(&prv->slice_ticker, NOW() + MICROSECS(CSCHED_TIME_APPLY));
 }
-
-/*
-void set_vcpu_affinity(struct vcpu *vc)
-{
-	struct domain *dom = vc->domain;
-	cpumask_t cpus;
-	struct vcpu *vcpu;
-	int cpu;
-
-	if(is_idle_domain(dom))
-		return;
-
-	cpumask_clear(&cpus);
-	for_each_vcpu(dom, vcpu)
-	{
-		cpu = vcpu->processor;
-		cpumask_set_cpu(cpu, &cpus);
-	}
-	for_each_vcpu(dom, vcpu)
-	{
-		cpumask_andnot(vcpu->cpu_affinity, &cpu_online_map, &cpus);
-		cpumask_set_cpu(vcpu->processor, vcpu->cpu_affinity);
-	}
-}
-
-static void get_cpu_load(int cpu)
-{
-	struct list_head *runq = RUNQ(cpu);
-	struct csched_pcpu *spc = CSCHED_PCPU(cpu);
-	struct list_head *iter;
-
-	spin_lock(&spc->runq_lock);
-
-	spc->runnable_tasks = 0;
-	list_for_each(iter, runq)
-		spc->runnable_tasks++;
-	
-	spin_unlock(&spc->runq_lock);
-}
-
-static int least_load_cpu_pick(struct vcpu *vc)
-{
-	cpumask_t cpus;
-	struct csched_pcpu *spc;
-	int cpu;
-	unsigned int min_load;
-	unsigned int load;
-	int least_load_cpu;
-
-	cpumask_and(&cpus, &cpu_online_map, vc->cpu_affinity);
-	for_each_cpu(cpu, &cpus)
-	{
-		get_cpu_load(cpu);
-	}
-
-	least_load_cpu = cpumask_first(&cpus);
-	spc = CSCHED_PCPU(least_load_cpu);
-	min_load = spc->runnable_tasks;
-
-	for_each_cpu(cpu, &cpus)
-	{
-		spc = CSCHED_PCPU(cpu);
-		load = spc->runnable_tasks;
-		if(load < min_load)
-		{
-			min_load = load;
-			least_load_cpu = cpu;
-		}
-	}
-	return least_load_cpu;
-}
-
-static void reset_vcpu_processor(struct vcpu *vc)
-{
-	int cpu;
-	struct domain *dom = vc->domain;
-
-	if(is_idle_domain(dom))
-		return;
-
-	//set_vcpu_affinity(vc);
-	cpu = least_load_cpu_pick(vc);
-	vc->processor = cpu;
-	set_vcpu_affinity(vc);
-}
-*/
 
 static void csched_tick(void *_cpu);
 static void csched_acct(void *dummy);
@@ -1054,11 +776,6 @@ _csched_cpu_pick(const struct scheduler *ops, struct vcpu *vc, bool_t commit)
     struct csched_pcpu *spc = NULL;
     int cpu;
 
-	/*added*/
-	//struct domain *dom = vc->domain;
-	//struct vcpu *vcpu;
-	//set_vcpu_affinity(vc);
-
     /*
      * Pick from online CPUs in VCPU's affinity mask, giving a
      * preference to its current processor if it's in there.
@@ -1133,20 +850,6 @@ _csched_cpu_pick(const struct scheduler *ops, struct vcpu *vc, bool_t commit)
         }
     }
 	
-	/*	
-	if(!is_idle_domain(dom))
-	{
-		for_each_vcpu(dom, vcpu)
-		{
-			//if we want to pick a cpu where our vcpu siblings are running on,
-			// we give a preference to current processor
-			if(vcpu != vc && 
-					vcpu->processor == cpu)
-				cpu = vc->processor;
-		}
-	}
-	*/
-
     if ( commit && spc )
        spc->idle_bias = cpu;
 
@@ -1268,22 +971,10 @@ csched_alloc_vdata(const struct scheduler *ops, struct vcpu *vc, void *dd)
     svc->flags = 0U;
     svc->pri = is_idle_domain(vc->domain) ?
         CSCHED_PRI_IDLE : CSCHED_PRI_TS_UNDER;
-	//reset_vcpu_processor(vc);	
 	/*added*/
 	for(i = 0; i < 4; i++)
 		svc->prev_pmc[i] = 0;
 
-	/*
-	for(i = 0; i < HISTO_BUCKETS + 1; i++)
-	{
-		svc->vcpu_histo_wait_count[i] = 0;
-		svc->vcpu_histo_wait_time[i] = 0;
-		svc->vcpu_histo_hold_count[i] = 0;
-		svc->vcpu_histo_hold_time[i] = 0;
-	}
-	svc->vcpu_wait_time_sum = 0;
-	svc->vcpu_hold_time_sum = 0;
-	*/
     CSCHED_VCPU_STATS_RESET(svc);
     CSCHED_STAT_CRANK(vcpu_init);
     return svc;
@@ -1547,17 +1238,6 @@ csched_dom_init(const struct scheduler *ops, struct domain *dom)
 		sdom->submilli[i].spinlock_accum = 0;
 		sdom->submilli[i].cache_miss_accum = 0;
 	}
-	/*
-	for(i = 0; i < HISTO_BUCKETS; i++)
-	{
-		sdom->dom_histo_wait_count[i] = 0;
-		sdom->dom_histo_wait_time[i] = 0;
-		sdom->dom_histo_hold_count[i] = 0;
-		sdom->dom_histo_hold_time[i] = 0;
-	}
-	sdom->dom_wait_time_sum = 0;
-	sdom->dom_hold_time_sum = 0;
-	*/
     return 0;
 }
 
@@ -1719,8 +1399,6 @@ csched_acct(void* dummy)
                         + (weight_total - 1)
                       ) / weight_total;
 
-		/*printk(XENLOG_WARNING "domain_id:%d  slice: %5d  credit_fair:%15d  credit_total:%15d  dom_weight:%5d  dom_vcpu_count:%3d  weight_total:%5d\n",
-            sdom->dom->domain_id, sdom->tslice_us, credit_fair, credit_total,sdom->weight, sdom->active_vcpu_count, weight_total);*/
 
         if ( credit_fair < credit_peak )
         {
@@ -1813,8 +1491,6 @@ csched_acct(void* dummy)
                 /* Upper bound on credits means VCPU stops earning */
                 if ( credit/100 > prv->credits_per_tslice/100 && svc->vcpu->domain->domain_id == 0)
                 {
-					/*printk(XENLOG_WARNING "vcpu:%2d  prev credit: %15d  credit fair: %15d  curr credit:%15d  slice_credit:%10d\n", 
-							svc->vcpu->vcpu_id, credit_prev, credit_fair, credit, prv->credits_per_tslice);*/
 					if(sdom->active_vcpu_count >= 2)
 	                    __csched_vcpu_acct_stop_locked(prv, svc);
                     /* Divide credits in half, so that when it starts
@@ -2277,7 +1953,6 @@ csched_dump_customized(const struct scheduler *ops)
 	struct csched_private *prv = CSCHED_PRIV(ops);
     struct domain *dom;
     struct vcpu *vc;
-    //int i;
 	unsigned long flags;
 	
 	spin_lock_irqsave(&(prv->lock), flags);
@@ -2292,50 +1967,9 @@ csched_dump_customized(const struct scheduler *ops)
 		if(is_idle_domain(dom)) continue;
 		printk("dom%d    \n", dom->domain_id);
 	
-		/*
-		printk("    dom: histo wait count buckets: ");
-		for(i = 0; i < HISTO_BUCKETS + 1; i++)
-			printk("%llu ", csdom->dom_histo_wait_count[i]);
-		printk("\n");
-		printk("    dom histo wait time buckets: (ms)");
-		for(i = 0; i < HISTO_BUCKETS + 1; i++)
-			printk("%llu ", csdom->dom_histo_wait_time[i] / 1000000);
-		printk("\n");
-		printk("    dom histo hold count buckets: ");
-		for(i = 0; i < HISTO_BUCKETS + 1; i++)
-			printk("%llu ", csdom->dom_histo_hold_count[i]);
-		printk("\n");
-		printk("    dom histo hold time buckets: (ms)");
-		for(i = 0; i <  HISTO_BUCKETS + 1; i++)
-			printk("%llu ", csdom->dom_histo_hold_time[i] / 1000000);
-		printk("\n");
-		printk("    dom spin wait time sum: %llums\n", csdom->dom_wait_time_sum / 1000000);
-		printk("    dom spin hold time sum: %llums\n", csdom->dom_hold_time_sum / 1000000);
-	   */	
 		for_each_vcpu(dom, vc)
 		{
-			//struct csched_vcpu *csvc = CSCHED_VCPU(vc);
 			printk("    vcpu%d: \n", vc->vcpu_id);
-			/*
-			printk("        vcpu waiting histo count buckets: ");
-			for(i = 0; i < HISTO_BUCKETS + 1; i++)
-				printk("%llu ", csvc->vcpu_histo_wait_count[i]);
-			printk("\n");
-			printk("        vcpu waiting histo time buckets: (ms)");
-			for(i = 0; i < HISTO_BUCKETS + 1; i++)
-				printk("%llu ", csvc->vcpu_histo_wait_time[i] / 1000000);
-			printk("\n");
-			printk("        vcpu holding histo count buckets: ");
-			for(i = 0; i < HISTO_BUCKETS + 1; i++)
-				printk("%llu ", csvc->vcpu_histo_hold_count[i]);
-			printk("\n");
-			printk("        vcpu holding histo time buckets: (ms)");
-			for(i = 0; i < HISTO_BUCKETS + 1; i++)
-				printk("%llu ", csvc->vcpu_histo_hold_time[i] / 1000000);
-			printk("\n");
-			printk("        vcpu spin waiting time sum: %llums\n", csvc->vcpu_wait_time_sum / 1000000);
-			printk("        vcpu spin holding time sum: %llums\n", csvc->vcpu_hold_time_sum / 1000000);
-			*/
             printk("        pmuinfo: INST_RETIRED=%llu  CPU_CLK_UNHALTED=%llu  LLC_REFERENCES=%llu  LLC_MISSES=%llu\n", vc->pmc[0], vc->pmc[1], vc->pmc[2], vc->pmc[3]);
 			printk("        sched_count: %llu\n", vc->sched_count);
 		}

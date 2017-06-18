@@ -303,7 +303,6 @@ static void csched_submilli_metric_update(struct csched_dom *sdom,
 									unsigned long long inst_retired,
 									unsigned long long cache_misses)
 {
-	//int idx = sdom->tslice_us / 1000 > 0 ? 9 : sdom->tslice_us / 100 - 1;
 	int miss_rate_curr = (inst_retired != 0 ? cache_misses * 100000 / inst_retired : 0);
 	int miss_rate_window = 0;
 	int i, evt_idx, err, count = 0;
@@ -396,7 +395,6 @@ static void csched_dom_metric_update(unsigned int cpu)
 	static unsigned long long cache_miss_sum, inst_sum, cycle_sum;
 	int i, update_epoch;
 	unsigned long long curr_pmc[4];
-	//uint16_tdd spinlock_log;
 	struct csched_private *prv = CSCHED_PRIV(per_cpu(scheduler, cpu));
 	
 	update_epoch = prv->metric_update;
@@ -426,8 +424,6 @@ static void csched_dom_metric_update(unsigned int cpu)
 				}
 			}
 
-			//spinlock_log = fls(sdom->spinlock_metric_update);
-			//spin_sum += spinlock_log;
 			inst_sum += curr_pmc[0];
 			cycle_sum += curr_pmc[1];
 			cache_miss_sum += curr_pmc[3];
@@ -444,6 +440,9 @@ static void csched_dom_metric_update(unsigned int cpu)
 			}
 			sdom->spinlock_metric_update = 0;
 			sdom->spinlock_count = 0;
+
+			for(i = 0; i < 4; i++)
+				curr_pmc[i] = 0;
 		}
 	}
 }
@@ -529,7 +528,6 @@ static void burn_credits(struct csched_vcpu *svc, s_time_t now)
 {
     s_time_t delta;
     unsigned int credits;
-	//int o_credits;
     /* Assert svc is current */
     ASSERT(svc==CSCHED_VCPU(per_cpu(schedule_data, svc->vcpu->processor).curr));
 
@@ -538,9 +536,6 @@ static void burn_credits(struct csched_vcpu *svc, s_time_t now)
 
     credits = (delta*CSCHED_CREDITS_PER_MSEC + MILLISECS(1)/2) / MILLISECS(1);
     atomic_sub(credits, &svc->credit);
-	/*o_credits = atomic_read(&svc->credit);
-	if(o_credits < 0)
-		svc->pri = CSCHED_PRI_TS_OVER;*/
     svc->start_time += (credits * MILLISECS(1)) / CSCHED_CREDITS_PER_MSEC;
 
 	/*printk(XENLOG_WARNING "burn credit: domain: %2d  vcpu: %2d  credits: %8d\n", 
@@ -1512,7 +1507,6 @@ csched_acct(void* dummy)
     }
 
     prv->credit_balance = credit_balance;
-	//printk(XENLOG_WARNING "credit_balance:%d\n", prv->credit_balance);
 
     spin_unlock_irqrestore(&prv->lock, flags);
 
@@ -1667,7 +1661,6 @@ csched_load_balance(struct csched_private *prv, int cpu,
         if ( speer != NULL )
         {
             *stolen = 1;
-			//set_vcpu_affinity(speer->vcpu);
             return speer;
         }
     }
